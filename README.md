@@ -1,5 +1,5 @@
 # MathBattle Telegram Bot
-Bot made for MathBattle telegram game. This script recognises the operation shown on screen and checks whether the given result is correct or not. **pyautogui, opencv and numpy libraries is needed!**
+Bot made for MathBattle telegram game. This script recognises the operation shown on screen and checks whether the given result is correct or not. **pyautogui, opencv and numpy libraries are needed!**
 
 ![alt tag](https://i.gyazo.com/dad0046853d9f6f9246fc99f0f793e79.gif)
 
