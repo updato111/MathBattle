@@ -2,12 +2,15 @@ import cv2
 import pyautogui
 import time
 import random
+import math
 import numpy as np
 
 
 class OperationResolver():
 
     __author__ : "EnriqueMoran"
+
+    __version__ : "0.1.5"
 
     def __init__(self):
         self.one = "./images/numbers/one.png"
@@ -32,63 +35,81 @@ class OperationResolver():
         self.matchTemplateMethod = eval('cv2.TM_CCOEFF_NORMED')    # Placing this here saves time (avoid multiple eval)
 
 
-    def getPosition(self, itemPath, image):    # Get right button position and confidence score
+    def getPosition(self, itemPath, image):    # Return position and confidence of a number from template matching
+        res = []
+        confidence = 0.99    # Initial confidence
         game = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         item = cv2.imread(itemPath, 0)
-        match = cv2.matchTemplate(game,item, self.matchTemplateMethod)
         w, h = item.shape[::-1]
-        _, max_val, _, top_left = cv2.minMaxLoc(match)
-        position = (top_left[0] + ((top_left[0] + w) / 2), top_left[1] + (top_left[1] + h) / 2)
-        return position, max_val
+
+        match = cv2.matchTemplate(game, item, self.matchTemplateMethod)
+        while len(res) < 2:
+            if confidence < 0.95:
+                return [(itemPath, (0.0, 0.0), -1)]    # The number is not in the image
+            loc = np.where(match >= confidence)
+            for pt in zip(*loc[::-1]):
+                res.append((pt[0] + (pt[0] + w) / 2, pt[1] + (pt[1] + h) / 2))
+            confidence -= 0.01
+        print("BEFORE: ", [(itemPath, pos, confidence) for pos in res])
+        res = self.removeDuplicatedPositions(res)
+        print("AFTER: ", [(itemPath, pos, confidence) for pos in res])
+        return [(itemPath, pos, confidence) for pos in res]    # 3-tuple (itemPath, position, confidence)
 
 
-    def getPositions(self, image):
-        positions = {self.one:None, self.two:None, self.three:None, self.four:None, self.five:None, self.six:None, self.seven:None, 
-        self.eight:None, self.nine:None, self.zero:None, self.equals:None, self.plus:None, self.minus:None, self.multiplication:None,
-        self.division:None, self.right:None, self.wrong:None, self.play:None, self.retry:None}
-
-        for itemPath in positions.keys():
-            newPosition, confidence = self.getPosition(itemPath, image)
-            if confidence < 0.9:
-                positions[itemPath] = None
-            else:
-                positions[itemPath] = newPosition
-        res = {key : value for (key, value) in positions.items() if value}    # Dict with non None elements
+    def removeDuplicatedPositions(self, positions):    # Remove false positive by proximity
+        res = [positions[0]]
+        for x_1, y_1 in positions:
+            if (x_1, y_1) != res[-1]:
+                #if math.sqrt((x_1 - res[-1][0]) ** 2 + (y_1 - res[-1][1]) ** 2) > 5:
+                if abs(x_1 - res[-1][0]) > 2 and abs(y_1 - res[-1][1]) > 2:
+                    res.append((x_1, y_1))            
         return res
 
 
-    def sortPositions(self, positions):    # Sort elements from left to right
-        res = {}
-        sorted_keys = sorted(positions, key=positions.get)
-        for key in sorted_keys:
-            res[key] = positions[key]
+    def getAllPositions(self, image):
+        res = []
+        itemPaths = [self.one, self.two, self.three, self.four, self.five, self.six,
+                    self.seven, self.eight, self.nine, self.zero, self.equals, self.plus, 
+                    self.minus, self.multiplication, self.division, self.retry]
+        for itemPath in itemPaths:
+            res += self.getPosition(itemPath, image)
+        return res
+
+
+    def getPositions(self, image):    # Return number and symbol position with confidence >= 0.9
+        res = []
+        positions = self.getAllPositions(image)
+        for itemPath, position, confidence in positions:
+            if confidence >= 0.9:
+                res.append((itemPath, position))
         return res
 
 
     def getRightSideElements(self, positions, element):    # Return elements that are at element's right side
-        res = {}
-        for item, position in positions.items():
-            if item != element:
-                if position[0] > positions[element][0] and (abs(position[1] - positions[element][1]) < 25):
-                    res[item] = position
+        res = []
+        for item, position in positions:
+            if item != element[0]:
+                if position[0] > element[1][0] and (abs(position[1] - element[1][1]) < 25):
+                    res.append((item, position))
         return res
 
 
     def getLeftSideElements(self, positions, element):    # Return elements that are at element's left side
-        res = {}
-        for item, position in positions.items():
-            if item != element:
-                if position[0] < positions[element][0] and (abs(position[1] - positions[element][1]) < 25):
-                    res[item] = position
+        res = []
+        for item, position in positions:
+            if item != element[0]:
+                if position[0] < element[1][0] and (abs(position[1] - element[1][1]) < 25):
+                    res.append((item, position))
         return res
 
 
-    def getResultElements(self, positions):    # Return result elements
-        res = {}
-        for item, position in positions.items():
+    def getResultElements(self, positions, image):    # Return result elements
+        res = []
+        _, equalsPos, _ = self.getPosition(self.equals, image)[0]
+        for item, position in positions:
             if item != self.equals:
-                if position[0] > positions[self.equals][0] and (abs(position[1] - positions[self.equals][1]) < 25):
-                    res[item] = position
+                if position[0] > equalsPos[0] and (abs(position[1] - equalsPos[1]) < 25):
+                    res.append((item, position))
         return res
 
 
@@ -100,13 +121,16 @@ class OperationResolver():
         return equivalence[element]
 
 
-    def identifyElements(self, positions):
-        symbol = [key for key in positions.keys() if key in [self.plus, self.minus, self.multiplication, self.division]][0]
+    def identifyElements(self, positions, image):
+        symbol = [key for key in positions if key[0] in [self.plus, self.minus, self.multiplication, self.division]][0]
+        
         rightSide = self.getRightSideElements(positions, symbol)
         leftSide = self.getLeftSideElements(positions, symbol)
-        result = self.getResultElements(positions)
-        operation_left = list(leftSide.keys()) + [symbol] + list(rightSide.keys())
-        operation_right = list(result.keys())
+        result = self.getResultElements(positions, image)
+        
+        operation_left = [key[0] for key in leftSide] + [symbol[0]] + [key[0] for key in rightSide]
+        operation_right = [key[0] for key in result]
+        
         res_left = [self.getStringElement(element) for element in operation_left]
         res_right = [self.getStringElement(element) for element in operation_right]
         return res_left,res_right
@@ -142,16 +166,17 @@ class MathBattle():
 
 
     def start(self):
-        try:
+        try:    # First play
             play_retry_button = pyautogui.locateOnScreen('./images/symbols/play.png', confidence=0.9)
             self.play_retry_pos = pyautogui.center(play_retry_button)
             pyautogui.moveTo(self.play_retry_pos.x, self.play_retry_pos.y, 0.5)
             print("Play button localized: ", str(self.play_retry_pos.x), ", ", str(self.play_retry_pos.y))
-        except:
+        except:    # Retry
             play_retry_button = pyautogui.locateOnScreen('./images/symbols/retry.png', confidence=0.9)
             self.play_retry_pos = pyautogui.center(play_retry_button)
             pyautogui.moveTo(self.play_retry_pos.x, self.play_retry_pos.y, 0.5)
             print("Retry button localized: ", str(self.play_retry_pos.x), ", ", str(self.play_retry_pos.y))
+
         pyautogui.click()
         time.sleep(0.1)
 
@@ -175,20 +200,22 @@ class MathBattle():
             screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
             positions = operationResolver.getPositions(screenshot)
-            positions = operationResolver.sortPositions(positions)
+            positions =  sorted(positions, key=lambda tup : tup[1])    # Sort elements from left to right position
 
-            if operationResolver.retry in positions.keys():
+            if operationResolver.retry in [pos[0] for pos in positions]:    # If there is retry button on screen
                 print("Lose")
-                break
-
-            symbol = [key for key in positions.keys() if key in [operationResolver.plus, operationResolver.minus, operationResolver.multiplication, operationResolver.division]][0]
-
-            right = operationResolver.getRightSideElements(positions, symbol)
-            left = operationResolver.getLeftSideElements(positions, symbol)
-            result = operationResolver.getResultElements(positions)
-            right, left = operationResolver.identifyElements(positions)
+                return None
 
             try:
+                symbol = [key for key in positions if key[0] in [operationResolver.plus, operationResolver.minus, operationResolver.multiplication, operationResolver.division]][0]
+                
+                right = operationResolver.getRightSideElements(positions, symbol)
+                left = operationResolver.getLeftSideElements(positions, symbol)
+                result = operationResolver.getResultElements(positions, screenshot)
+                right, left = operationResolver.identifyElements(positions, screenshot)
+                print(right, left, "\n\n\n")
+
+                
                 res = operationResolver.getOperation(left, right)
             except:
                 print("Random!")
