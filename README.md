@@ -17,5 +17,5 @@ Leave the play button uncovered and run the script. It will automatically start 
 ![alt tag](https://i.gyazo.com/77022a874b421d8cd99b8638153e4efc.png)
 
 
-## TODO
-* **Fix duplicated digits:** If there are any duplicated digits on the screen, the script will press a button randomly. It works correctly only when all digits are different.
+## Changelog
+* **version 0.1.5:**  Multiple number recognition by template matching partially implemented, sometimes the script will not recognise them correctly.
